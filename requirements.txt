@@ -1,0 +1,5 @@
+# La app NO necesita dependencias de pip en tiempo de ejecucion
+# (usa solo la libreria estandar de Python: tkinter, urllib, etc.).
+#
+# Esto es solo para COMPILAR el .exe:
+pyinstaller>=6.0
