@@ -6,7 +6,8 @@ y el **package name (application ID)** de un archivo `.apk`.
 - Interfaz gráfica simple.
 - Sin dependencias de Python que instalar: usa solo la librería estándar
   (Tkinter). Se distribuye como un **único `.exe`**.
-- Descarga sus herramientas (`apktool` y firmador) automáticamente la primera vez.
+- **Descarga TODO lo que necesita automáticamente** la primera vez: Java (un
+  JRE portátil), `apktool` y el firmador. No hay que instalar nada a mano.
 
 ---
 
@@ -18,14 +19,17 @@ y el **package name (application ID)** de un archivo `.apk`.
    - (O compílalo tú mismo, ver más abajo.)
 2. Ejecuta `ApkRenamer.exe`. No necesita instalación.
 
-### Único requisito externo: Java
+### Cero requisitos: todo es automático
 
-Para reconstruir y firmar el APK se necesita **Java 8 o superior**. Si no lo
-tienes, instala [Adoptium Temurin](https://adoptium.net/) (Next → Next → Finish).
-La app te avisa si falta.
+La primera vez que procesas un APK (o pulsando **"Descargar Java + herramientas"**),
+la app descarga sola y deja listos:
 
-> apktool y el firmador (`uber-apk-signer`) se descargan solos la primera vez
-> que procesas un APK. No hay que instalar nada más.
+- **Java** (JRE Temurin 17 portátil) — solo si no tienes Java ya instalado.
+- **apktool** — para decodificar y reconstruir el APK.
+- **uber-apk-signer** — para alinear y firmar el APK.
+
+Todo se guarda en `%LOCALAPPDATA%\ApkRenamer\tools`. Solo necesitas **conexión a
+internet** la primera vez (la descarga ronda los 45 MB por el JRE).
 
 ---
 

@@ -84,9 +84,9 @@ class App(tk.Tk):
         bar.grid(row=8, column=0, columnspan=3, sticky="ew", **pad)
         bar.columnconfigure(0, weight=1)
         ttk.Label(bar, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
-        ttk.Button(bar, text="Descargar herramientas", command=self._download_tools).grid(
-            row=0, column=1, sticky="e"
-        )
+        ttk.Button(
+            bar, text="Descargar Java + herramientas", command=self._download_tools
+        ).grid(row=0, column=1, sticky="e")
 
     # ------------------------------------------------------------ helpers ---
     def _browse_apk(self) -> None:
@@ -125,9 +125,9 @@ class App(tk.Tk):
     def _refresh_tool_status(self) -> None:
         st = apk_tools.check_tools()
         parts = []
-        parts.append("Java: OK" if st.java else "Java: NO ENCONTRADO")
-        parts.append("apktool: OK" if st.apktool else "apktool: falta")
-        parts.append("firmador: OK" if st.signer else "firmador: falta")
+        parts.append("Java: OK" if st.java else "Java: se descargará")
+        parts.append("apktool: OK" if st.apktool else "apktool: se descargará")
+        parts.append("firmador: OK" if st.signer else "firmador: se descargará")
         self.status_var.set("   |   ".join(parts))
 
     def _set_busy(self, busy: bool) -> None:
