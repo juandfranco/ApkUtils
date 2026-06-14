@@ -3,3 +3,4 @@
 #
 # Esto es solo para COMPILAR el .exe:
 pyinstaller>=6.0
+certifi>=2024.1.1  # certificados raiz para que las descargas HTTPS funcionen

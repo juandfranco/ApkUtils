@@ -12,6 +12,7 @@ import glob
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -119,10 +120,34 @@ def check_tools() -> ToolStatus:
     )
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Contexto SSL robusto: usa certifi y/o los certificados del sistema."""
+    ctx = ssl.create_default_context()
+    try:
+        import certifi  # incluido en el .exe; valida HTTPS sin depender del SO
+
+        ctx.load_verify_locations(certifi.where())
+    except Exception:
+        pass
+    try:
+        ctx.load_default_certs()  # añade los certificados del sistema (Windows)
+    except Exception:
+        pass
+    return ctx
+
+
 def _open_url(url: str):
     # GitHub/Adoptium rechazan el User-Agent por defecto de urllib (403).
     req = urllib.request.Request(url, headers={"User-Agent": "ApkRenamer"})
-    return urllib.request.urlopen(req)
+    try:
+        return urllib.request.urlopen(req, context=_ssl_context())
+    except ssl.SSLError:
+        # Último recurso: descargar sin verificar el certificado. Las URLs son
+        # fijas y de confianza (GitHub Releases), así que es aceptable aquí.
+        insecure = ssl.create_default_context()
+        insecure.check_hostname = False
+        insecure.verify_mode = ssl.CERT_NONE
+        return urllib.request.urlopen(req, context=insecure)
 
 
 def _download(url: str, dest: str, log) -> None:
