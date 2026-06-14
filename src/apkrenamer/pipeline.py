@@ -73,7 +73,7 @@ def process(
         os.makedirs(out_dir, exist_ok=True)
         apk_tools.run_java_jar(
             apk_tools.signer_path(),
-            ["--apks", unsigned, "--out", out_dir, "--overwrite", "--allowResign"],
+            ["--apks", unsigned, "--out", out_dir, "--allowResign"],
             log,
         )
 
