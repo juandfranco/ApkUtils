@@ -5,6 +5,9 @@ on:
     branches: [ "**" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -29,3 +32,18 @@ jobs:
         with:
           name: ApkRenamer-windows
           path: dist/ApkRenamer.exe
+
+      # Publica el .exe como Release descargable (solo en la rama main).
+      - name: Publicar Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: ApkRenamer (último build)
+          body: |
+            Versión más reciente de **ApkRenamer.exe**.
+
+            Descarga el `.exe` de abajo, ejecútalo y listo. La primera vez
+            descarga solo Java + apktool + firmador (necesita internet).
+          files: dist/ApkRenamer.exe
+          make_latest: true
