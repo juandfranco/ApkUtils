@@ -1,7 +1,8 @@
 # APK Renamer
 
-App de escritorio para **Windows** sencilla para cambiar el **nombre visible**
-y el **package name (application ID)** de un archivo `.apk`.
+App de escritorio para **Windows** sencilla para cambiar el **nombre visible**,
+el **package name (application ID)** y la **versión** (`versionCode` /
+`versionName`) de un archivo `.apk`.
 
 - Interfaz gráfica simple.
 - Sin dependencias de Python que instalar: usa solo la librería estándar
@@ -36,9 +37,10 @@ internet** la primera vez (la descarga ronda los 45 MB por el JRE).
 ## Uso
 
 1. **APK de entrada**: elige el `.apk`.
-2. **Cargar datos del APK**: lee el nombre y el package actuales.
-3. Marca lo que quieras cambiar y escribe el nuevo **nombre visible** y/o el
-   nuevo **package name** (formato `com.empresa.app`).
+2. **Cargar datos del APK**: lee el nombre, el package y la versión actuales.
+3. Marca lo que quieras cambiar y escribe el nuevo **nombre visible**, el
+   nuevo **package name** (formato `com.empresa.app`) y/o la nueva
+   **versión**.
 4. Elige la ruta del **APK de salida**.
 5. **Procesar APK**. Al terminar tendrás un APK reconstruido y firmado, listo
    para instalar.
@@ -60,6 +62,21 @@ original** sin tocar el código compilado.
 > Nota: algunas apps con providers/authorities fijos al package original pueden
 > requerir ajustes adicionales. Para rebranding e instalación en paralelo, el
 > cambio de application ID cubre la mayoría de los casos.
+
+---
+
+## Cambiar la versión
+
+- **versionCode**: número entero (1 a 2.100.000.000) que Android usa para
+  decidir si un APK es una actualización de otro.
+- **versionName**: el texto que ve el usuario (p. ej. `1.2.3`). Admite
+  cualquier carácter.
+
+Como el APK resultante se firma con una clave distinta a la original, Android
+no lo instalará **encima** de la app original aunque el `versionCode` sea
+mayor; para eso hay que desinstalar la original o cambiar también el package
+name. Además, si la app muestra su versión leyendo `BuildConfig` desde el
+código, ese texto interno no cambia (Android y el sistema sí ven la nueva).
 
 ---
 
@@ -98,7 +115,7 @@ build.bat / run.bat         Compilar / ejecutar
 src/apkrenamer/
   gui.py                    Interfaz Tkinter
   pipeline.py               Decodificar -> editar -> reconstruir -> firmar
-  renamer.py                Edición de AndroidManifest y recursos
+  renamer.py                Edición de AndroidManifest, recursos y versión
   apk_tools.py              Java + descarga de apktool y firmador
 .github/workflows/          CI que compila el .exe en Windows
 ```

@@ -8,12 +8,20 @@ import glob
 import os
 import shutil
 import tempfile
+from typing import NamedTuple
 
 from . import apk_tools, renamer
 
 
-def load_apk_info(apk_path: str, log=print) -> tuple[str, str]:
-    """Decodifica el APK en una carpeta temporal y devuelve (package, nombre)."""
+class ApkInfo(NamedTuple):
+    package: str
+    name: str
+    version_code: str
+    version_name: str
+
+
+def load_apk_info(apk_path: str, log=print) -> ApkInfo:
+    """Decodifica el APK en una carpeta temporal y devuelve sus datos actuales."""
     apk_tools.ensure_tools(log)
     work = tempfile.mkdtemp(prefix="apkinfo_")
     decoded = os.path.join(work, "app")
@@ -24,7 +32,9 @@ def load_apk_info(apk_path: str, log=print) -> tuple[str, str]:
             ["d", "-f", "-s", "-o", decoded, apk_path],
             log,
         )
-        return renamer.read_info(decoded)
+        package, name = renamer.read_info(decoded)
+        code, vname = renamer.read_version(decoded)
+        return ApkInfo(package, name, code, vname)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -35,6 +45,8 @@ def process(
     new_name: str | None,
     new_package: str | None,
     log=print,
+    new_version_code: str | None = None,
+    new_version_name: str | None = None,
 ) -> str:
     """Aplica los cambios y devuelve la ruta del APK final firmado."""
     apk_tools.ensure_tools(log)
@@ -57,6 +69,13 @@ def process(
             log(f"== Cambiando package name a: {new_package} ==")
             old = renamer.set_package_name(decoded, new_package)
             log(f"   (package anterior: {old})")
+        if new_version_code is not None or new_version_name is not None:
+            old_code, old_name = renamer.read_version(decoded)
+            renamer.set_version(decoded, new_version_code, new_version_name)
+            if new_version_code is not None:
+                log(f"== Cambiando versionCode: {old_code or '?'} -> {new_version_code} ==")
+            if new_version_name is not None:
+                log(f"== Cambiando versionName: {old_name or '?'} -> {new_version_name} ==")
 
         # 3) Reconstruir.
         log("== Reconstruyendo APK ==")

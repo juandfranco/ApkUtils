@@ -10,7 +10,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import apk_tools, pipeline
+from . import apk_tools, pipeline, renamer
 
 APP_TITLE = "APK Renamer"
 
@@ -19,8 +19,8 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("720x600")
-        self.minsize(640, 520)
+        self.geometry("720x680")
+        self.minsize(640, 600)
 
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._busy = False
@@ -62,26 +62,41 @@ class App(tk.Tk):
         self.pkg_var = tk.StringVar()
         ttk.Entry(frm, textvariable=self.pkg_var).grid(row=3, column=1, columnspan=2, sticky="ew", **pad)
 
+        # Versión (desactivada por defecto: solo se cambia si se pide).
+        self.vcode_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frm, text="Cambiar versionCode:", variable=self.vcode_enabled
+        ).grid(row=4, column=0, sticky="w", **pad)
+        self.vcode_var = tk.StringVar()
+        ttk.Entry(frm, textvariable=self.vcode_var).grid(row=4, column=1, columnspan=2, sticky="ew", **pad)
+
+        self.vname_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frm, text="Cambiar versionName:", variable=self.vname_enabled
+        ).grid(row=5, column=0, sticky="w", **pad)
+        self.vname_var = tk.StringVar()
+        ttk.Entry(frm, textvariable=self.vname_var).grid(row=5, column=1, columnspan=2, sticky="ew", **pad)
+
         # APK de salida
-        ttk.Label(frm, text="APK de salida:").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Label(frm, text="APK de salida:").grid(row=6, column=0, sticky="w", **pad)
         self.out_var = tk.StringVar()
-        ttk.Entry(frm, textvariable=self.out_var).grid(row=4, column=1, sticky="ew", **pad)
-        ttk.Button(frm, text="Examinar…", command=self._browse_out).grid(row=4, column=2, **pad)
+        ttk.Entry(frm, textvariable=self.out_var).grid(row=6, column=1, sticky="ew", **pad)
+        ttk.Button(frm, text="Examinar…", command=self._browse_out).grid(row=6, column=2, **pad)
 
         # Acción principal
         self.run_btn = ttk.Button(frm, text="Procesar APK", command=self._run)
-        self.run_btn.grid(row=5, column=1, sticky="w", **pad)
+        self.run_btn.grid(row=7, column=1, sticky="w", **pad)
 
         # Log
-        ttk.Label(frm, text="Registro:").grid(row=6, column=0, sticky="w", **pad)
+        ttk.Label(frm, text="Registro:").grid(row=8, column=0, sticky="w", **pad)
         self.log_text = tk.Text(frm, height=14, wrap="word", state="disabled")
-        self.log_text.grid(row=7, column=0, columnspan=3, sticky="nsew", **pad)
-        frm.rowconfigure(7, weight=1)
+        self.log_text.grid(row=9, column=0, columnspan=3, sticky="nsew", **pad)
+        frm.rowconfigure(9, weight=1)
 
         # Barra de estado
         self.status_var = tk.StringVar()
         bar = ttk.Frame(frm)
-        bar.grid(row=8, column=0, columnspan=3, sticky="ew", **pad)
+        bar.grid(row=10, column=0, columnspan=3, sticky="ew", **pad)
         bar.columnconfigure(0, weight=1)
         ttk.Label(bar, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
         ttk.Button(
@@ -162,11 +177,19 @@ class App(tk.Tk):
             return
 
         def task() -> None:
-            pkg, name = pipeline.load_apk_info(apk, self.log)
-            self.after(0, lambda: self.pkg_var.set(pkg))
-            self.after(0, lambda: self.name_var.set(name))
-            self.log(f"Package actual: {pkg}")
-            self.log(f"Nombre actual: {name}")
+            info = pipeline.load_apk_info(apk, self.log)
+
+            def fill() -> None:
+                self.pkg_var.set(info.package)
+                self.name_var.set(info.name)
+                self.vcode_var.set(info.version_code)
+                self.vname_var.set(info.version_name)
+
+            self.after(0, fill)
+            self.log(f"Package actual: {info.package}")
+            self.log(f"Nombre actual: {info.name}")
+            self.log(f"versionCode actual: {info.version_code or '(no definido)'}")
+            self.log(f"versionName actual: {info.version_name or '(no definido)'}")
 
         self._run_in_thread(task)
 
@@ -182,8 +205,22 @@ class App(tk.Tk):
 
         new_name = self.name_var.get().strip() if self.name_enabled.get() else None
         new_pkg = self.pkg_var.get().strip() if self.pkg_enabled.get() else None
-        if not new_name and not new_pkg:
+        new_vcode = self.vcode_var.get().strip() if self.vcode_enabled.get() else None
+        new_vname = self.vname_var.get().strip() if self.vname_enabled.get() else None
+        if not (new_name or new_pkg or new_vcode is not None or new_vname is not None):
             messagebox.showwarning(APP_TITLE, "Activa al menos un cambio.")
+            return
+        if new_vcode is not None and not (
+            new_vcode.isdigit() and 0 < int(new_vcode) <= renamer.MAX_VERSION_CODE
+        ):
+            messagebox.showwarning(
+                APP_TITLE,
+                f"El versionCode debe ser un número entero entre 1 y "
+                f"{renamer.MAX_VERSION_CODE}.",
+            )
+            return
+        if new_vname is not None and not new_vname:
+            messagebox.showwarning(APP_TITLE, "El versionName no puede estar vacío.")
             return
         if new_pkg and not _valid_package(new_pkg):
             messagebox.showwarning(
@@ -193,7 +230,10 @@ class App(tk.Tk):
             return
 
         def task() -> None:
-            result = pipeline.process(apk, out, new_name, new_pkg, self.log)
+            result = pipeline.process(
+                apk, out, new_name, new_pkg, self.log,
+                new_version_code=new_vcode, new_version_name=new_vname,
+            )
             self.after(
                 0,
                 lambda: messagebox.showinfo(APP_TITLE, f"APK generado:\n{result}"),

@@ -16,6 +16,7 @@ tener que mover el código smali, que es lo que la mayoría de usuarios quiere
 from __future__ import annotations
 
 import glob
+import html
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -162,6 +163,109 @@ def _absolute_class(package: str, name: str) -> str:
     if "." not in name:
         return f"{package}.{name}"
     return name  # ya es un nombre totalmente cualificado
+
+
+# ------------------------------------------------------------ versión ---
+#
+# Al decodificar, apktool saca versionCode/versionName del manifest y los
+# guarda en apktool.yml (bloque `versionInfo`), y al reconstruir se los pasa a
+# aapt. Pero el lector YAML de apktool 2.9.x es muy limitado: corta el valor
+# en el primer ':' y elimina las comillas. Para admitir cualquier texto, el
+# valor nuevo se escribe en el AndroidManifest.xml (XML escapa todo bien) y la
+# clave correspondiente de apktool.yml se pone a `null`, de modo que aapt use
+# el valor del manifest.
+
+MAX_VERSION_CODE = 2_100_000_000  # límite que impone Google Play / Android
+
+
+def _yml_path(decoded_dir: str) -> str:
+    return os.path.join(decoded_dir, "apktool.yml")
+
+
+def _yaml_value(raw: str) -> str:
+    value = raw.strip()
+    if value in ("", "null", "~"):
+        return ""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    # apktool escapa como XML los valores que vuelca (&quot;, &amp;, ...).
+    return html.unescape(value)
+
+
+_VERSION_LINE = re.compile(r"^(\s+)(versionCode|versionName):(.*)$")
+
+
+def read_version(decoded_dir: str) -> tuple[str, str]:
+    """Devuelve (versionCode, versionName) del APK decodificado ('' si falta)."""
+    code = name = ""
+    yml = _yml_path(decoded_dir)
+    if os.path.isfile(yml):
+        in_block = False
+        for line in open(yml, encoding="utf-8").read().splitlines():
+            if line and not line[0].isspace():
+                in_block = line.rstrip() == "versionInfo:"
+                continue
+            m = _VERSION_LINE.match(line)
+            if in_block and m:
+                if m.group(2) == "versionCode":
+                    code = _yaml_value(m.group(3))
+                else:
+                    name = _yaml_value(m.group(3))
+
+    # El manifest tiene prioridad si declara los atributos.
+    root = ET.fromstring(open(_manifest_path(decoded_dir), encoding="utf-8").read())
+    code = root.get(f"{_AND}versionCode") or code
+    name = root.get(f"{_AND}versionName") or name
+    return code, name
+
+
+def set_version(
+    decoded_dir: str,
+    version_code: str | None,
+    version_name: str | None,
+) -> None:
+    """Cambia versionCode y/o versionName. None = dejar el valor actual."""
+    if version_code is None and version_name is None:
+        return
+    if version_code is not None:
+        version_code = version_code.strip()
+        if not version_code.isdigit() or not 0 < int(version_code) <= MAX_VERSION_CODE:
+            raise ValueError(
+                f"versionCode debe ser un entero entre 1 y {MAX_VERSION_CODE}."
+            )
+        version_code = str(int(version_code))
+    if version_name is not None:
+        version_name = version_name.strip()
+        if not version_name:
+            raise ValueError("versionName no puede estar vacío.")
+
+    changes = {"versionCode": version_code, "versionName": version_name}
+    changes = {k: v for k, v in changes.items() if v is not None}
+
+    # 1) Manifest: aquí vive el valor nuevo.
+    path = _manifest_path(decoded_dir)
+    text = open(path, encoding="utf-8").read()
+    _register_namespaces(text)
+    root = ET.fromstring(text)
+    for attr, value in changes.items():
+        root.set(f"{_AND}{attr}", value)
+    _write_manifest(root, path)
+
+    # 2) apktool.yml: anulamos esas claves para que no pisen al manifest.
+    yml = _yml_path(decoded_dir)
+    if not os.path.isfile(yml):
+        return
+    lines = open(yml, encoding="utf-8").read().splitlines()
+    in_block = False
+    for i, line in enumerate(lines):
+        if line and not line[0].isspace():
+            in_block = line.rstrip() == "versionInfo:"
+            continue
+        m = _VERSION_LINE.match(line)
+        if in_block and m and m.group(2) in changes:
+            lines[i] = f"{m.group(1)}{m.group(2)}: null"
+    with open(yml, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 def _write_manifest(root: ET.Element, path: str) -> None:
