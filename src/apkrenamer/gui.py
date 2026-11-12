@@ -10,7 +10,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import apk_tools, pipeline, renamer, signing
+from . import apk_tools, pipeline, renamer, settings, signing
 
 APP_TITLE = "APK Renamer"
 
@@ -24,10 +24,14 @@ class App(tk.Tk):
 
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._busy = False
+        self._settings = settings.load()
+        self._loaded_package: str | None = None  # package ORIGINAL del APK cargado
 
         self._build_ui()
+        self._restore_general()
         self._refresh_tool_status()
         self.after(100, self._drain_log)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ---------------------------------------------------------------- UI ---
     def _build_ui(self) -> None:
@@ -159,6 +163,12 @@ class App(tk.Tk):
             w = ttk.Entry(fields, textvariable=var, show=show, width=14)
             w.grid(row=0, column=col * 2 + 1, sticky="w")
             self._custom_widgets.append(w)
+        self.remember_pass = tk.BooleanVar(value=False)
+        cb = ttk.Checkbutton(fields, text="Recordar", variable=self.remember_pass)
+        cb.grid(row=0, column=6, sticky="w", padx=(8, 0))
+        if not settings.can_encrypt():
+            cb.state(["disabled"])
+        self._custom_widgets.append(cb)
 
         # Huella y origen de la clave elegida
         self.key_info_var = tk.StringVar()
@@ -175,16 +185,70 @@ class App(tk.Tk):
         )
         self._on_key_change()
 
+    # ---------------------------------------------------------- ajustes ---
+    def _general(self) -> dict:
+        return self._settings["general"]
+
+    def _restore_general(self) -> None:
+        """Vuelve a poner la clave y el keystore usados la última vez."""
+        g = self._general()
+        self._apply_key_settings(g)
+        if g.get("remember_pass"):
+            self.remember_pass.set(True)
+            self.ks_pass_var.set(settings.decrypt(g.get("ks_pass")))
+            self.ks_keypass_var.set(settings.decrypt(g.get("ks_keypass")))
+
+    def _apply_key_settings(self, d: dict) -> None:
+        source = d.get("key_source")
+        if source == signing.SOURCE_PC and not os.path.isfile(signing.pc_debug_keystore()):
+            source = None
+        if source in signing.SOURCE_LABELS:
+            self.key_source.set(source)
+        if d.get("ks_path"):
+            self.ks_path_var.set(d["ks_path"])
+            self.ks_alias_var.set(d.get("ks_alias", ""))
+        self._on_key_change()
+
+    def _key_settings(self) -> dict:
+        return {
+            "key_source": self.key_source.get(),
+            "ks_path": self.ks_path_var.get().strip(),
+            "ks_alias": self.ks_alias_var.get().strip(),
+        }
+
+    def _save_general(self) -> None:
+        g = self._general()
+        g.update(self._key_settings())
+        remember = bool(self.remember_pass.get())
+        g["remember_pass"] = remember
+        g["ks_pass"] = settings.encrypt(self.ks_pass_var.get()) if remember else None
+        g["ks_keypass"] = settings.encrypt(self.ks_keypass_var.get()) if remember else None
+        try:
+            settings.save(self._settings)
+        except OSError as exc:
+            self.log(f"AVISO: no se pudieron guardar los ajustes: {exc}")
+
+    def _on_close(self) -> None:
+        self._save_general()
+        self.destroy()
+
+    def _suggest_output(self, apk_path: str, out_dir: str | None = None) -> None:
+        base, ext = os.path.splitext(os.path.basename(apk_path))
+        folder = out_dir if out_dir and os.path.isdir(out_dir) else os.path.dirname(apk_path)
+        self.out_var.set(os.path.join(folder, f"{base}_renombrado{ext}").replace("\\", "/"))
+
     # ------------------------------------------------------------ helpers ---
     def _browse_apk(self) -> None:
         path = filedialog.askopenfilename(
-            title="Selecciona un APK", filetypes=[("APK", "*.apk"), ("Todos", "*.*")]
+            title="Selecciona un APK", filetypes=[("APK", "*.apk"), ("Todos", "*.*")],
+            initialdir=self._general().get("in_dir") or None,
         )
         if path:
             self.apk_var.set(path)
-            if not self.out_var.get():
-                base, ext = os.path.splitext(path)
-                self.out_var.set(f"{base}_renombrado{ext}")
+            self._general()["in_dir"] = os.path.dirname(path)
+            self._loaded_package = None
+            self._suggest_output(path)
+            self._load_info()
 
     def _browse_keystore(self) -> None:
         path = filedialog.askopenfilename(
@@ -213,9 +277,12 @@ class App(tk.Tk):
         )
 
     def _browse_out(self) -> None:
+        current = self.out_var.get().strip()
         path = filedialog.asksaveasfilename(
             title="Guardar APK como", defaultextension=".apk",
             filetypes=[("APK", "*.apk")],
+            initialdir=os.path.dirname(current) if current else None,
+            initialfile=os.path.basename(current) if current else "",
         )
         if path:
             self.out_var.set(path)
@@ -313,12 +380,16 @@ class App(tk.Tk):
 
         def task() -> None:
             info = pipeline.load_apk_info(apk, self.log)
+            profile = self._settings["apps"].get(info.package)
 
             def fill() -> None:
+                self._loaded_package = info.package
                 self.pkg_var.set(info.package)
                 self.name_var.set(info.name)
                 self.vcode_var.set(info.version_code)
                 self.vname_var.set(info.version_name)
+                if profile:
+                    self._apply_profile(profile, apk)
 
             self.after(0, fill)
             self.log(f"Package actual: {info.package}")
@@ -330,8 +401,36 @@ class App(tk.Tk):
             self.after(0, lambda: self.input_sig_var.set(sig))
             self.log(f"Firmado con: {who}")
             self.log(f"   SHA-256: {info.signer_sha256 or '-'}")
+            if profile:
+                self.log(f"== Ajustes guardados para {info.package} aplicados ==")
+                self.log(f"   nombre: {profile.get('name') or '(sin cambio)'}   "
+                         f"package: {profile.get('package') or '(sin cambio)'}")
+                self.log(f"   firma: {signing.SOURCE_LABELS.get(profile.get('key_source'), '?')}")
 
         self._run_in_thread(task)
+
+    def _apply_profile(self, profile: dict, apk: str) -> None:
+        """Rellena el formulario con lo usado la última vez para esta app."""
+        self.name_enabled.set(bool(profile.get("name_enabled", True)))
+        self.pkg_enabled.set(bool(profile.get("pkg_enabled", True)))
+        if profile.get("name"):
+            self.name_var.set(profile["name"])
+        if profile.get("package"):
+            self.pkg_var.set(profile["package"])
+        self._apply_key_settings(profile)
+        self._suggest_output(apk, profile.get("out_dir"))
+
+    def _save_profile(self, original_package: str, out: str) -> None:
+        profile = {
+            "name": self.name_var.get().strip(),
+            "package": self.pkg_var.get().strip(),
+            "name_enabled": bool(self.name_enabled.get()),
+            "pkg_enabled": bool(self.pkg_enabled.get()),
+            "out_dir": os.path.dirname(os.path.abspath(out)),
+            **self._key_settings(),
+        }
+        self._settings["apps"][original_package] = profile
+        self._save_general()
 
     def _run(self) -> None:
         apk = self.apk_var.get().strip()
@@ -370,19 +469,24 @@ class App(tk.Tk):
             return
 
         params = self._key_params()
+        original_package = self._loaded_package
 
         def task() -> None:
             apk_tools.ensure_tools(self.log)
             key = signing.resolve_key(*params)
+            orig = original_package or pipeline.load_apk_info(apk, lambda *_: None).package
             result = pipeline.process(
                 apk, out, new_name, new_pkg, self.log,
                 new_version_code=new_vcode, new_version_name=new_vname,
                 key=key,
             )
-            self.after(
-                0,
-                lambda: messagebox.showinfo(APP_TITLE, f"APK generado:\n{result}"),
-            )
+
+            def done() -> None:
+                self._save_profile(orig, result)
+                self.log(f"Ajustes guardados para la próxima vez ({orig}).")
+                messagebox.showinfo(APP_TITLE, f"APK generado:\n{result}")
+
+            self.after(0, done)
 
         self._run_in_thread(task)
 

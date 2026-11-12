@@ -71,6 +71,22 @@ Play**, que rechaza APKs firmados en modo debug.
 
 ---
 
+## Ajustes que se recuerdan
+
+La app guarda en `%LOCALAPPDATA%\ApkRenamer\settings.json`:
+
+- **La última clave elegida** (y la ruta y alias del keystore propio). La
+  contraseña solo se guarda si marcas **Recordar**, y cifrada con Windows
+  (DPAPI): solo tu usuario en ese PC puede descifrarla.
+- **Un perfil por app**, según su package original. Al procesar, por ejemplo,
+  `com.android.mgstv` como "Xuper" / `com.android.pepito`, la próxima vez que
+  elijas un APK de esa app se rellenan solos el nombre, el package, la clave y
+  la carpeta de salida. La versión no se guarda: se lee de cada APK.
+
+Al elegir un APK con **Examinar…** sus datos se cargan automáticamente.
+
+---
+
 ## Cómo funciona el cambio de package name
 
 Se cambia el atributo `package` del `AndroidManifest.xml` (el *application ID*
