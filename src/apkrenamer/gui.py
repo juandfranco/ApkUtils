@@ -10,7 +10,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import apk_tools, pipeline, renamer, settings, signing
+from . import apk_tools, permissions, pipeline, renamer, settings, signing
 
 APP_TITLE = "APK Renamer"
 
@@ -19,13 +19,15 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("760x880")
-        self.minsize(680, 800)
+        self.geometry("760x910")
+        self.minsize(680, 830)
 
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._busy = False
         self._settings = settings.load()
         self._loaded_package: str | None = None  # package ORIGINAL del APK cargado
+        self._apk_permissions: list[permissions.Permission] = []
+        self._remove_perms: set[str] = set()
 
         self._build_ui()
         self._restore_general()
@@ -81,36 +83,45 @@ class App(tk.Tk):
         self.vname_var = tk.StringVar()
         ttk.Entry(frm, textvariable=self.vname_var).grid(row=5, column=1, columnspan=2, sticky="ew", **pad)
 
+        # Permisos
+        ttk.Label(frm, text="Permisos:").grid(row=6, column=0, sticky="w", **pad)
+        perm_row = ttk.Frame(frm)
+        perm_row.grid(row=6, column=1, columnspan=2, sticky="ew", **pad)
+        self.perm_btn = ttk.Button(perm_row, text="Elegir permisos…", command=self._edit_permissions)
+        self.perm_btn.grid(row=0, column=0, sticky="w")
+        self.perm_summary_var = tk.StringVar(value="(se leen al cargar el APK)")
+        ttk.Label(perm_row, textvariable=self.perm_summary_var).grid(row=0, column=1, sticky="w", padx=8)
+
         # Firma del APK cargado
-        ttk.Label(frm, text="Firma del APK:").grid(row=6, column=0, sticky="nw", **pad)
+        ttk.Label(frm, text="Firma del APK:").grid(row=7, column=0, sticky="nw", **pad)
         self.input_sig_var = tk.StringVar(value="(pulsa 'Cargar datos del APK')")
         ttk.Label(frm, textvariable=self.input_sig_var, wraplength=560, justify="left").grid(
-            row=6, column=1, columnspan=2, sticky="w", **pad
+            row=7, column=1, columnspan=2, sticky="w", **pad
         )
 
         # Clave con la que se firma el APK de salida
-        self._build_signing(frm, row=7, pad=pad)
+        self._build_signing(frm, row=8, pad=pad)
 
         # APK de salida
-        ttk.Label(frm, text="APK de salida:").grid(row=8, column=0, sticky="w", **pad)
+        ttk.Label(frm, text="APK de salida:").grid(row=9, column=0, sticky="w", **pad)
         self.out_var = tk.StringVar()
-        ttk.Entry(frm, textvariable=self.out_var).grid(row=8, column=1, sticky="ew", **pad)
-        ttk.Button(frm, text="Examinar…", command=self._browse_out).grid(row=8, column=2, **pad)
+        ttk.Entry(frm, textvariable=self.out_var).grid(row=9, column=1, sticky="ew", **pad)
+        ttk.Button(frm, text="Examinar…", command=self._browse_out).grid(row=9, column=2, **pad)
 
         # Acción principal
         self.run_btn = ttk.Button(frm, text="Procesar APK", command=self._run)
-        self.run_btn.grid(row=9, column=1, sticky="w", **pad)
+        self.run_btn.grid(row=10, column=1, sticky="w", **pad)
 
         # Log
-        ttk.Label(frm, text="Registro:").grid(row=10, column=0, sticky="w", **pad)
+        ttk.Label(frm, text="Registro:").grid(row=11, column=0, sticky="w", **pad)
         self.log_text = tk.Text(frm, height=10, wrap="word", state="disabled")
-        self.log_text.grid(row=11, column=0, columnspan=3, sticky="nsew", **pad)
-        frm.rowconfigure(11, weight=1)
+        self.log_text.grid(row=12, column=0, columnspan=3, sticky="nsew", **pad)
+        frm.rowconfigure(12, weight=1)
 
         # Barra de estado
         self.status_var = tk.StringVar()
         bar = ttk.Frame(frm)
-        bar.grid(row=12, column=0, columnspan=3, sticky="ew", **pad)
+        bar.grid(row=13, column=0, columnspan=3, sticky="ew", **pad)
         bar.columnconfigure(0, weight=1)
         ttk.Label(bar, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
         ttk.Button(
@@ -164,8 +175,11 @@ class App(tk.Tk):
             w.grid(row=0, column=col * 2 + 1, sticky="w")
             self._custom_widgets.append(w)
         self.remember_pass = tk.BooleanVar(value=False)
-        cb = ttk.Checkbutton(fields, text="Recordar", variable=self.remember_pass)
-        cb.grid(row=0, column=6, sticky="w", padx=(8, 0))
+        cb = ttk.Checkbutton(
+            fields, text="Recordar contraseña (se guarda cifrada en este PC)",
+            variable=self.remember_pass,
+        )
+        cb.grid(row=1, column=0, columnspan=6, sticky="w", padx=(12, 0), pady=(2, 0))
         if not settings.can_encrypt():
             cb.state(["disabled"])
         self._custom_widgets.append(cb)
@@ -247,6 +261,8 @@ class App(tk.Tk):
             self.apk_var.set(path)
             self._general()["in_dir"] = os.path.dirname(path)
             self._loaded_package = None
+            self._apk_permissions = []
+            self._set_removed(set())
             self._suggest_output(path)
             self._load_info()
 
@@ -388,6 +404,8 @@ class App(tk.Tk):
                 self.name_var.set(info.name)
                 self.vcode_var.set(info.version_code)
                 self.vname_var.set(info.version_name)
+                self._apk_permissions = list(info.permissions)
+                self._set_removed(set())
                 if profile:
                     self._apply_profile(profile, apk)
 
@@ -396,6 +414,7 @@ class App(tk.Tk):
             self.log(f"Nombre actual: {info.name}")
             self.log(f"versionCode actual: {info.version_code or '(no definido)'}")
             self.log(f"versionName actual: {info.version_name or '(no definido)'}")
+            self.log(f"Permisos: {len(info.permissions)}")
             who = signing.identify(info.signer_sha256)
             sig = f"{who}\nSHA-256: {info.signer_sha256 or '-'}"
             self.after(0, lambda: self.input_sig_var.set(sig))
@@ -406,8 +425,31 @@ class App(tk.Tk):
                 self.log(f"   nombre: {profile.get('name') or '(sin cambio)'}   "
                          f"package: {profile.get('package') or '(sin cambio)'}")
                 self.log(f"   firma: {signing.SOURCE_LABELS.get(profile.get('key_source'), '?')}")
+                if profile.get("remove_permissions"):
+                    self.log(f"   permisos a quitar: {len(profile['remove_permissions'])}")
 
         self._run_in_thread(task)
+
+    def _update_perm_summary(self) -> None:
+        total = len(self._apk_permissions)
+        if not total:
+            self.perm_summary_var.set("(se leen al cargar el APK)")
+            return
+        n = len(self._remove_perms)
+        dangerous = sum(p.kind == permissions.KIND_DANGEROUS for p in self._apk_permissions)
+        text = f"{total} permisos ({dangerous} peligrosos)"
+        text += f"  ·  se quitarán {n}" if n else "  ·  no se quita ninguno"
+        self.perm_summary_var.set(text)
+
+    def _edit_permissions(self) -> None:
+        if not self._apk_permissions:
+            messagebox.showinfo(APP_TITLE, "Carga primero un APK para ver sus permisos.")
+            return
+        PermissionsDialog(self, self._apk_permissions, self._remove_perms, self._set_removed)
+
+    def _set_removed(self, removed: set[str]) -> None:
+        self._remove_perms = set(removed)
+        self._update_perm_summary()
 
     def _apply_profile(self, profile: dict, apk: str) -> None:
         """Rellena el formulario con lo usado la última vez para esta app."""
@@ -419,6 +461,8 @@ class App(tk.Tk):
             self.pkg_var.set(profile["package"])
         self._apply_key_settings(profile)
         self._suggest_output(apk, profile.get("out_dir"))
+        present = {p.name for p in self._apk_permissions}
+        self._set_removed(set(profile.get("remove_permissions", [])) & present)
 
     def _save_profile(self, original_package: str, out: str) -> None:
         profile = {
@@ -427,6 +471,7 @@ class App(tk.Tk):
             "name_enabled": bool(self.name_enabled.get()),
             "pkg_enabled": bool(self.pkg_enabled.get()),
             "out_dir": os.path.dirname(os.path.abspath(out)),
+            "remove_permissions": sorted(self._remove_perms),
             **self._key_settings(),
         }
         self._settings["apps"][original_package] = profile
@@ -446,7 +491,9 @@ class App(tk.Tk):
         new_pkg = self.pkg_var.get().strip() if self.pkg_enabled.get() else None
         new_vcode = self.vcode_var.get().strip() if self.vcode_enabled.get() else None
         new_vname = self.vname_var.get().strip() if self.vname_enabled.get() else None
-        if not (new_name or new_pkg or new_vcode is not None or new_vname is not None):
+        remove_perms = sorted(self._remove_perms)
+        if not (new_name or new_pkg or new_vcode is not None or new_vname is not None
+                or remove_perms):
             messagebox.showwarning(APP_TITLE, "Activa al menos un cambio.")
             return
         if new_vcode is not None and not (
@@ -479,6 +526,7 @@ class App(tk.Tk):
                 apk, out, new_name, new_pkg, self.log,
                 new_version_code=new_vcode, new_version_name=new_vname,
                 key=key,
+                remove_permissions=remove_perms,
             )
 
             def done() -> None:
@@ -489,6 +537,89 @@ class App(tk.Tk):
             self.after(0, done)
 
         self._run_in_thread(task)
+
+
+class PermissionsDialog(tk.Toplevel):
+    """Lista de permisos con casillas: marcada = se mantiene."""
+
+    _KIND_TEXT = {
+        permissions.KIND_DANGEROUS: "PELIGROSO",
+        permissions.KIND_SPECIAL: "especial",
+        permissions.KIND_NORMAL: "",
+    }
+
+    def __init__(self, master, perms, removed: set[str], on_accept) -> None:
+        super().__init__(master)
+        self.title("Permisos del APK")
+        self.geometry("640x560")
+        self.transient(master)
+        self.grab_set()
+        self._on_accept = on_accept
+        order = {permissions.KIND_DANGEROUS: 0, permissions.KIND_SPECIAL: 1,
+                 permissions.KIND_NORMAL: 2}
+        self._perms = sorted(perms, key=lambda p: (order[p.kind], p.name))
+        self._vars: dict[str, tk.BooleanVar] = {}
+
+        ttk.Label(
+            self, padding=(10, 8, 10, 4), wraplength=600, justify="left",
+            text=("Desmarca los permisos que quieras QUITAR. Los peligrosos suelen poder "
+                  "quitarse sin problema; los marcados con ⚠ la app suele necesitarlos y "
+                  "quitarlos puede hacer que se cierre."),
+        ).pack(fill="x")
+
+        outer = ttk.Frame(self, padding=(10, 0))
+        outer.pack(fill="both", expand=True)
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-e.delta // 120, "units"))
+        self.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        for i, p in enumerate(self._perms):
+            var = tk.BooleanVar(value=p.name not in removed)
+            self._vars[p.name] = var
+            ttk.Checkbutton(inner, variable=var, text=p.short if p.is_android else p.name).grid(
+                row=i, column=0, sticky="w"
+            )
+            tag = self._KIND_TEXT[p.kind] + ("  ⚠ necesario" if p.risky_to_remove else "")
+            ttk.Label(inner, text=tag, foreground="#b00020" if p.kind != "normal" else "#8a6d00").grid(
+                row=i, column=1, sticky="w", padx=12
+            )
+
+        btns = ttk.Frame(self, padding=10)
+        btns.pack(fill="x")
+        ttk.Button(btns, text="Quitar todos los peligrosos", command=self._drop_dangerous).pack(side="left")
+        ttk.Button(btns, text="Mantener todos", command=self._keep_all).pack(side="left", padx=6)
+        ttk.Button(btns, text="Aceptar", command=self._accept).pack(side="right")
+        ttk.Button(btns, text="Cancelar", command=self.destroy).pack(side="right", padx=6)
+
+    def _drop_dangerous(self) -> None:
+        for p in self._perms:
+            if p.kind == permissions.KIND_DANGEROUS:
+                self._vars[p.name].set(False)
+
+    def _keep_all(self) -> None:
+        for v in self._vars.values():
+            v.set(True)
+
+    def _accept(self) -> None:
+        removed = {name for name, v in self._vars.items() if not v.get()}
+        risky = [p.short for p in self._perms if p.name in removed and p.risky_to_remove]
+        if risky and not messagebox.askyesno(
+            APP_TITLE,
+            "Vas a quitar permisos que la app suele necesitar:\n\n  "
+            + "\n  ".join(risky)
+            + "\n\nLa app podría cerrarse al abrirla. ¿Quitarlos igualmente?",
+            parent=self,
+        ):
+            return
+        self._on_accept(removed)
+        self.destroy()
 
 
 def _valid_package(pkg: str) -> bool:

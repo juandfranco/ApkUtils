@@ -9,7 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=['apkrenamer', 'apkrenamer.gui', 'apkrenamer.pipeline',
-                   'apkrenamer.renamer', 'apkrenamer.apk_tools', 'apkrenamer.signing', 'apkrenamer.settings', 'certifi'],
+                   'apkrenamer.renamer', 'apkrenamer.apk_tools', 'apkrenamer.signing', 'apkrenamer.settings', 'apkrenamer.permissions', 'certifi'],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],

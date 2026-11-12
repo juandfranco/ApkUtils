@@ -10,7 +10,7 @@ import shutil
 import tempfile
 from typing import NamedTuple
 
-from . import apk_tools, renamer, signing
+from . import apk_tools, permissions, renamer, signing
 
 
 class ApkInfo(NamedTuple):
@@ -19,6 +19,7 @@ class ApkInfo(NamedTuple):
     version_code: str
     version_name: str
     signer_sha256: str | None
+    permissions: list[permissions.Permission] = []
 
 
 def load_apk_info(apk_path: str, log=print) -> ApkInfo:
@@ -35,7 +36,11 @@ def load_apk_info(apk_path: str, log=print) -> ApkInfo:
         )
         package, name = renamer.read_info(decoded)
         code, vname = renamer.read_version(decoded)
-        return ApkInfo(package, name, code, vname, signing.apk_signer_sha256(apk_path))
+        return ApkInfo(
+            package, name, code, vname,
+            signing.apk_signer_sha256(apk_path),
+            permissions.read_permissions(decoded),
+        )
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -49,6 +54,7 @@ def process(
     new_version_code: str | None = None,
     new_version_name: str | None = None,
     key: signing.SigningKey | None = None,
+    remove_permissions: list[str] | None = None,
 ) -> str:
     """Aplica los cambios y devuelve la ruta del APK final firmado."""
     apk_tools.ensure_tools(log)
@@ -81,6 +87,14 @@ def process(
                 log(f"== Cambiando versionCode: {old_code or '?'} -> {new_version_code} ==")
             if new_version_name is not None:
                 log(f"== Cambiando versionName: {old_name or '?'} -> {new_version_name} ==")
+        if remove_permissions:
+            removed = permissions.remove_permissions(decoded, remove_permissions)
+            log(f"== Quitando {len(removed)} permiso(s) ==")
+            for p in removed:
+                log(f"   - {p}")
+            missing = sorted(set(remove_permissions) - set(removed))
+            if missing:
+                log(f"   (no estaban en este APK: {', '.join(missing)})")
 
         # 3) Reconstruir.
         log("== Reconstruyendo APK ==")

@@ -1,8 +1,8 @@
 # APK Renamer
 
 App de escritorio para **Windows** sencilla para cambiar el **nombre visible**,
-el **package name (application ID)** y la **versión** (`versionCode` /
-`versionName`) de un archivo `.apk`.
+el **package name (application ID)**, la **versión** (`versionCode` /
+`versionName`) y los **permisos** de un archivo `.apk`.
 
 - Interfaz gráfica simple.
 - Sin dependencias de Python que instalar: usa solo la librería estándar
@@ -71,6 +71,22 @@ Play**, que rechaza APKs firmados en modo debug.
 
 ---
 
+## Quitar permisos
+
+**Elegir permisos…** muestra los permisos que pide el APK, con los
+**peligrosos** (cámara, ubicación, almacenamiento, notificaciones…) arriba.
+Desmarca los que quieras quitar; se borran sus `<uses-permission>` del
+manifest. **Quitar todos los peligrosos** los desmarca de una vez.
+
+- Los **peligrosos** suelen poder quitarse sin problema: desde Android 6 el
+  usuario ya puede negarlos, así que las apps están preparadas.
+- Los marcados con **⚠ necesario** (`INTERNET`, `ACCESS_NETWORK_STATE`,
+  `WAKE_LOCK`, `FOREGROUND_SERVICE`…) la app suele darlos por hechos: si los
+  quitas puede cerrarse al abrirla. La app pide confirmación antes.
+- La selección se guarda en el perfil de la app para la próxima versión.
+
+---
+
 ## Ajustes que se recuerdan
 
 La app guarda en `%LOCALAPPDATA%\ApkRenamer\settings.json`:
@@ -80,8 +96,8 @@ La app guarda en `%LOCALAPPDATA%\ApkRenamer\settings.json`:
   (DPAPI): solo tu usuario en ese PC puede descifrarla.
 - **Un perfil por app**, según su package original. Al procesar, por ejemplo,
   `com.android.mgstv` como "Xuper" / `com.android.pepito`, la próxima vez que
-  elijas un APK de esa app se rellenan solos el nombre, el package, la clave y
-  la carpeta de salida. La versión no se guarda: se lee de cada APK.
+  elijas un APK de esa app se rellenan solos el nombre, el package, la clave,
+  los permisos a quitar y la carpeta de salida. La versión no se guarda: se lee de cada APK.
 
 Al elegir un APK con **Examinar…** sus datos se cargan automáticamente.
 
@@ -153,6 +169,9 @@ src/apkrenamer/
   gui.py                    Interfaz Tkinter
   pipeline.py               Decodificar -> editar -> reconstruir -> firmar
   renamer.py                Edición de AndroidManifest, recursos y versión
+  permissions.py            Leer, clasificar y quitar permisos
+  signing.py                Claves de firma, huellas y exportación
+  settings.py               Ajustes y perfiles por app
   apk_tools.py              Java + descarga de apktool y firmador
 .github/workflows/          CI que compila el .exe en Windows
 ```
