@@ -239,13 +239,22 @@ def ensure_tools(log=print) -> None:
         _download(SIGNER_URL, signer_path(), log)
 
 
-def run_java_jar(jar: str, args: list[str], log=print) -> None:
-    """Ejecuta `java -jar jar args...` retransmitiendo la salida al log."""
+def run_java_jar(
+    jar: str, args: list[str], log=print, secrets: list[str] | None = None
+) -> None:
+    """Ejecuta `java -jar jar args...` retransmitiendo la salida al log.
+
+    Los valores de `secrets` (contraseñas) se muestran como *** en el log.
+    """
     java = find_java()
     if not java:
         raise RuntimeError("Java no disponible.")
     cmd = [java, "-jar", jar, *args]
-    log("> " + " ".join(os.path.basename(c) if i < 3 else c for i, c in enumerate(cmd)))
+    hidden = set(secrets or [])
+    log("> " + " ".join(
+        os.path.basename(c) if i < 3 else ("***" if c in hidden else c)
+        for i, c in enumerate(cmd)
+    ))
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -257,7 +266,10 @@ def run_java_jar(jar: str, args: list[str], log=print) -> None:
     )
     assert proc.stdout is not None
     for line in proc.stdout:
-        log(line.rstrip())
+        line = line.rstrip()
+        for s in hidden:
+            line = line.replace(s, "***")
+        log(line)
     code = proc.wait()
     if code != 0:
         raise RuntimeError(f"El proceso terminó con código {code}.")

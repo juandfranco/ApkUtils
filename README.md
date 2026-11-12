@@ -37,16 +37,37 @@ internet** la primera vez (la descarga ronda los 45 MB por el JRE).
 ## Uso
 
 1. **APK de entrada**: elige el `.apk`.
-2. **Cargar datos del APK**: lee el nombre, el package y la versión actuales.
+2. **Cargar datos del APK**: lee el nombre, el package, la versión actuales y
+   **con qué clave está firmado**.
 3. Marca lo que quieras cambiar y escribe el nuevo **nombre visible**, el
    nuevo **package name** (formato `com.empresa.app`) y/o la nueva
    **versión**.
-4. Elige la ruta del **APK de salida**.
-5. **Procesar APK**. Al terminar tendrás un APK reconstruido y firmado, listo
+4. Elige con qué **clave se firma** el APK de salida (ver abajo).
+5. Elige la ruta del **APK de salida**.
+6. **Procesar APK**. Al terminar tendrás un APK reconstruido y firmado, listo
    para instalar.
 
-El APK resultante se firma con una clave **debug**, suficiente para instalarlo
-en un dispositivo (no para publicarlo en Google Play).
+---
+
+## Firma: qué clave se usa
+
+Android solo deja **actualizar** una app si el APK nuevo está firmado con la
+**misma clave** que el instalado. Por eso puedes elegir la clave:
+
+| Opción | De dónde sale | Cuándo usarla |
+|---|---|---|
+| **Clave debug de este PC** | `%USERPROFILE%\.android\debug.keystore` (la crea Android Studio, distinta en cada PC) | Apps que ya firmaste en este PC |
+| **Clave del firmador** | La clave debug que trae uber-apk-signer, **igual en todos los PCs** | Apps firmadas en un PC sin `debug.keystore` |
+| **Keystore propio** | Tu `.jks` / `.keystore` / `.p12` | Lo recomendable: no depende del PC |
+
+- **Ver huella y origen** muestra la ruta del keystore y su huella SHA-256.
+- **Exportar esta clave…** copia el keystore a la carpeta que elijas junto a un
+  `.LEEME.txt` con su alias y huella.
+- Al cargar un APK se muestra su huella y si coincide con una de las claves
+  conocidas, así sabes con cuál firmarlo para poder actualizarlo.
+
+Las claves debug valen para instalar en tus dispositivos, **no para Google
+Play**, que rechaza APKs firmados en modo debug.
 
 ---
 

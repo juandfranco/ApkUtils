@@ -10,7 +10,7 @@ import shutil
 import tempfile
 from typing import NamedTuple
 
-from . import apk_tools, renamer
+from . import apk_tools, renamer, signing
 
 
 class ApkInfo(NamedTuple):
@@ -18,6 +18,7 @@ class ApkInfo(NamedTuple):
     name: str
     version_code: str
     version_name: str
+    signer_sha256: str | None
 
 
 def load_apk_info(apk_path: str, log=print) -> ApkInfo:
@@ -34,7 +35,7 @@ def load_apk_info(apk_path: str, log=print) -> ApkInfo:
         )
         package, name = renamer.read_info(decoded)
         code, vname = renamer.read_version(decoded)
-        return ApkInfo(package, name, code, vname)
+        return ApkInfo(package, name, code, vname, signing.apk_signer_sha256(apk_path))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -47,9 +48,13 @@ def process(
     log=print,
     new_version_code: str | None = None,
     new_version_name: str | None = None,
+    key: signing.SigningKey | None = None,
 ) -> str:
     """Aplica los cambios y devuelve la ruta del APK final firmado."""
     apk_tools.ensure_tools(log)
+    if key is None:
+        key = signing.resolve_key(signing.default_source())
+    key_info = signing.keystore_info(key)
     work = tempfile.mkdtemp(prefix="apkwork_")
     decoded = os.path.join(work, "app")
     try:
@@ -87,13 +92,16 @@ def process(
         )
 
         # 4) Firmar (uber-apk-signer alinea y firma con una clave debug).
-        log("== Firmando APK ==")
+        log(f"== Firmando APK con: {key.label} ==")
+        log(f"   keystore: {key.keystore}")
+        log(f"   alias: {key_info.alias}   SHA-256: {key_info.sha256}")
         out_dir = os.path.join(work, "signed")
         os.makedirs(out_dir, exist_ok=True)
         apk_tools.run_java_jar(
             apk_tools.signer_path(),
-            ["--apks", unsigned, "--out", out_dir, "--allowResign"],
+            ["--apks", unsigned, "--out", out_dir, "--allowResign", *key.signer_args()],
             log,
+            secrets=key.secrets() if key.source == signing.SOURCE_CUSTOM else None,
         )
 
         produced = _find_signed(out_dir)
@@ -102,6 +110,16 @@ def process(
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         shutil.copyfile(produced, output_path)
+
+        original = signing.apk_signer_sha256(apk_path)
+        final = signing.apk_signer_sha256(output_path)
+        if final != key_info.sha256:
+            raise RuntimeError(
+                f"El APK salió firmado con otra clave ({final}); se esperaba {key_info.sha256}."
+            )
+        if original and original != final:
+            log("AVISO: la firma es distinta a la del APK original. Para instalarlo")
+            log("   habrá que desinstalar antes la app original (o cambiar el package).")
         log(f"== Listo: {output_path} ==")
         return output_path
     finally:

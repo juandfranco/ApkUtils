@@ -7,3 +7,12 @@ dist/
 .venv/
 venv/
 tools/
+
+# Claves: nunca al repositorio
+*.jks
+*.keystore
+*.p12
+*.pfx
+adbkey
+adbkey.pub
+.android*/
