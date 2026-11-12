@@ -11,6 +11,18 @@ cambiarlo se "expanden" los nombres de componentes relativos (por ejemplo
 sigan apuntando a las clases reales. Así se logra un renombrado fiable sin
 tener que mover el código smali, que es lo que la mayoría de usuarios quiere
 (rebrandear e instalar junto a la app original).
+
+Para poder instalarse JUNTO a la original también hay que renombrar lo que
+Android exige que sea único en el dispositivo y que suele llevar el package:
+
+- las `android:authorities` de los <provider> (si no: INSTALL_FAILED_CONFLICTING_PROVIDER);
+- los permisos propios <permission> y sus referencias
+  (si no: INSTALL_FAILED_DUPLICATE_PERMISSION).
+
+Solo se cambia el prefijo `paquete.viejo.` -> `paquete.nuevo.`. Las librerías
+(androidx, Firebase, FileProvider...) construyen esos nombres con
+getPackageName() en tiempo de ejecución, así que el renombrado coincide con lo
+que la app espera.
 """
 
 from __future__ import annotations
@@ -131,7 +143,7 @@ def _update_string_resource(decoded_dir: str, key: str, value: str) -> None:
         tree.write(default, encoding="utf-8", xml_declaration=True)
 
 
-def set_package_name(decoded_dir: str, new_package: str) -> str:
+def set_package_name(decoded_dir: str, new_package: str, log=None) -> str:
     """Cambia el package name (application ID). Devuelve el package anterior."""
     path = _manifest_path(decoded_dir)
     text = open(path, encoding="utf-8").read()
@@ -151,10 +163,62 @@ def set_package_name(decoded_dir: str, new_package: str) -> str:
             if val:
                 el.set(attr, _absolute_class(old_package, val))
 
-    # 2) Cambiamos el package del manifest al nuevo.
+    # 2) Renombramos authorities y permisos propios ligados al package viejo.
+    renamed = _rename_unique_names(root, old_package, new_package)
+
+    # 3) Cambiamos el package del manifest al nuevo.
     root.set("package", new_package)
     _write_manifest(root, path)
+    if log:
+        for kind, old, new in renamed:
+            log(f"   {kind}: {old} -> {new}")
     return old_package
+
+
+# Atributos que contienen nombres de permiso.
+_PERMISSION_ATTRS = ("permission", "readPermission", "writePermission")
+_PERMISSION_DECL_TAGS = {"permission", "permission-group", "permission-tree"}
+_PERMISSION_USE_TAGS = {"uses-permission", "uses-permission-sdk-23"}
+
+
+def _swap_prefix(value: str, old: str, new: str) -> str:
+    if value == old:
+        return new
+    if value.startswith(old + "."):
+        return new + value[len(old):]
+    return value
+
+
+def _rename_unique_names(
+    root: ET.Element, old: str, new: str
+) -> list[tuple[str, str, str]]:
+    """Cambia authorities y permisos propios `old.*` -> `new.*`."""
+    changes: list[tuple[str, str, str]] = []
+
+    def swap(el: ET.Element, attr: str, kind: str) -> None:
+        val = el.get(f"{_AND}{attr}")
+        if not val:
+            return
+        if attr == "authorities":
+            parts = val.split(";")
+            new_val = ";".join(_swap_prefix(p.strip(), old, new) for p in parts)
+        else:
+            new_val = _swap_prefix(val, old, new)
+        if new_val != val:
+            el.set(f"{_AND}{attr}", new_val)
+            changes.append((kind, val, new_val))
+
+    for el in root.iter():
+        tag = el.tag.split("}")[-1]
+        if tag == "provider":
+            swap(el, "authorities", "provider")
+        if tag in _PERMISSION_DECL_TAGS or tag in _PERMISSION_USE_TAGS:
+            swap(el, "name", "permiso")
+        if tag == "permission":
+            swap(el, "permissionGroup", "grupo de permisos")
+        for attr in _PERMISSION_ATTRS:
+            swap(el, attr, "permiso requerido")
+    return changes
 
 
 def _absolute_class(package: str, name: str) -> str:

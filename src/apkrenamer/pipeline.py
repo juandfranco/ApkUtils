@@ -78,8 +78,13 @@ def process(
             renamer.set_app_name(decoded, new_name)
         if new_package:
             log(f"== Cambiando package name a: {new_package} ==")
-            old = renamer.set_package_name(decoded, new_package)
+            old = renamer.set_package_name(decoded, new_package, log)
             log(f"   (package anterior: {old})")
+            if remove_permissions:
+                # Los permisos propios `old.*` acaban de renombrarse a `new.*`.
+                remove_permissions = [
+                    renamer._swap_prefix(p, old, new_package) for p in remove_permissions
+                ]
         if new_version_code is not None or new_version_name is not None:
             old_code, old_name = renamer.read_version(decoded)
             renamer.set_version(decoded, new_version_code, new_version_name)
